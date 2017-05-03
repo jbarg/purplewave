@@ -1,6 +1,6 @@
 from libnmap.process import NmapProcess
 from libnmap.parser import NmapParser
-from database import Host, Service
+from database import Host, Service, and_, NoResultFound
 
 from task import Task
 
@@ -24,13 +24,22 @@ class NmapTask(Task):
             if host.status != 'up':
                 continue
 
-            dbhost = self.db.get_or_create(Host, ipv4=host.address,
-                                           hostname=tmp_host)
+            try:
+                dbhost = self.db.get(Host, and_(
+                    Host.ipv4 == host.address,
+                    Host.hostname == tmp_host)
+                )
+            except NoResultFound:
+                dbhost = self.db.create(
+                    Host,
+                    ipv4=host.address,
+                    hostname=tmp_host
+                )
 
             # remove old services
             # XXX should be create_or_update
             for service in dbhost.services:
-                self.db.delete(Service, id=service.id)
+                self.db.delete(Service, Service.id == service.id)
 
             for serv in host.services:
                 service = self.db.create(

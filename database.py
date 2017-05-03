@@ -60,12 +60,12 @@ class Database(object):
             self.session.commit()
         return new_obj
 
-    def delete(self, model, **kwargs):
-        res = self._filter(model, **kwargs)
+    def delete(self, model, filters):
+        res = self._filter(model, filters)
         return res.delete()
 
-    def get_or_create(self, model, **kwargs):
+    def get_or_create(self, model, filters):
         try:
-            return self.get(model, **kwargs)
+            return self.get(model, filters)
         except NoResultFound:
-            return self.create(model, **kwargs)
+            return self.create(model, filters)

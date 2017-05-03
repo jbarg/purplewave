@@ -187,7 +187,7 @@ class MyPrompt(Cmd):
     def do_nmap_import(self, args):
         nmap = NmapTask(self.controller.db)
         nmap.parse_from_files(args)
-        self.controller.tasks.append(nmap)
+        # self.controller.tasks.append(nmap)
         self.lastcmd = ''
 
     def do_quit(self, args):
