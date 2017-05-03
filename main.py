@@ -136,8 +136,12 @@ class MyPrompt(Cmd):
         if params.H:
             try:
                 for host in params.H:
-                    host = self.controller.db.get(Host, Host.ipv4 == host)
-                    filters = and_(filters, Service.host == host)
+                    hosts = self.controller.db.filter(
+                        Host,
+                        Host.ipv4.like('%{}%'.format(host))
+                    )
+                    hosts_id = [h.id for h in hosts]
+                    filters = and_(filters, Service.host_id.in_(hosts_id))
             except NoResultFound:
                 print('no such host')
                 return
@@ -189,7 +193,6 @@ class MyPrompt(Cmd):
             print(Fore.RED + 'no tasks')
             return
 
-        print(fmt.format('pid', '%', 'state', 'task'))
         for task in self.controller.tasks:
             pid = task['pid']
             task = task['task']
