@@ -1,8 +1,40 @@
 from libnmap.process import NmapProcess
 from libnmap.parser import NmapParser
-from database import Host, Service, and_, NoResultFound
+from database import Host, Service, NoResultFound
 
 from task import Task
+import plugins
+
+
+class NmapPlugin(plugins.Plugin):
+    def __init__(self, controller):
+        self.controller = controller
+
+    def get_do_methods(self):
+        return (
+            ('do_nmap', self.do_nmap),
+            ('do_nmap_import', self.do_nmap_import),
+        )
+
+    def do_nmap(self, args):
+        """nmap <host> <opts>"""
+        host = args.split(' ')[0]
+        args = ' '.join(args.split(' ')[1:])
+
+        nmap = NmapTask(self.controller.db)
+        nmap.scan(host, args)
+
+        self.controller.tasks.append(nmap)
+
+    def do_nmap_import(self, args):
+        nmap = NmapTask(self.controller.db)
+        nmap.parse_from_files(args)
+
+    def __str__(self):
+        return "NmapPlugin"
+
+
+plugins.plugins.register(NmapPlugin)
 
 
 class NmapTask(Task):
@@ -25,10 +57,7 @@ class NmapTask(Task):
                 continue
 
             try:
-                dbhost = self.db.get(Host, and_(
-                    Host.ipv4 == host.address,
-                    Host.hostname == tmp_host)
-                )
+                dbhost = self.db.get(Host, Host.ipv4 == host.address)
             except NoResultFound:
                 dbhost = self.db.create(
                     Host,

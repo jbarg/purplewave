@@ -69,3 +69,6 @@ class Database(object):
             return self.get(model, filters)
         except NoResultFound:
             return self.create(model, filters)
+
+
+db = Database()

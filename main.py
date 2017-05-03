@@ -1,46 +1,36 @@
-from cmd import Cmd
 import os
 import colorama
 import signal
 import argparse
+from cmd import Cmd
 from colorama import Fore, Style
 
-from database import Host, Database, Service, and_, or_, NoResultFound
-from nmap import NmapTask
-
-
-class AbortException(Exception):
-    pass
-
-
-class TaskList(list):
-    """TaskList class"""
-    def append(self, task):
-        pid = max([task['pid'] for task in self] or [1])
-        super().append(dict(pid=pid, task=task))
-
-    def remove_task(self, pid):
-        task = self.get_task(pid)
-        if task:
-            self.remove(task[0])
-
-    def get_task(self, pid):
-        return [t for t in self if t['pid'] == pid]
+from database import db, Host, Service, and_, or_, NoResultFound
+from task import TaskList
+import plugins
 
 
 class MainController(object):
     """Main Controller"""
     tasks = TaskList()
-    db = Database()
+    db = db
+    plugins = plugins.plugins
 
     def __init__(self):
         signal.signal(signal.SIGINT, self.signal_handler)
+        self.prompt = MyPrompt(self)
+
+        for plugin in self.plugins:
+            instance = plugin(self)
+            print('Loading plugin {}'.format(instance))
+            for method_name, method in instance.get_do_methods():
+                setattr(self.prompt, method_name, method)
+
         self.start_prompt()
 
     def start_prompt(self):
-        self.prompt = MyPrompt(self)
         self.prompt.ruler = ''
-        self.prompt.prompt = '0 tasks> '
+        self.prompt.prompt = Fore.YELLOW + '0 tasks> ' + Style.RESET_ALL
         self.prompt.cmdloop('Starting prompt...')
 
     @staticmethod
@@ -173,23 +163,6 @@ class MyPrompt(Cmd):
             )
         print(line.format('host', 'port', 'service', 'state', 'version'))
 
-    def do_nmap(self, args):
-        """nmap <host> <opts>"""
-        host = args.split(' ')[0]
-        args = ' '.join(args.split(' ')[1:])
-
-        nmap = NmapTask(self.controller.db)
-        nmap.scan(host, args)
-
-        self.controller.tasks.append(nmap)
-        self.lastcmd = ''
-
-    def do_nmap_import(self, args):
-        nmap = NmapTask(self.controller.db)
-        nmap.parse_from_files(args)
-        # self.controller.tasks.append(nmap)
-        self.lastcmd = ''
-
     def do_quit(self, args):
         """Quits the program."""
         raise SystemExit
@@ -238,7 +211,11 @@ class MyPrompt(Cmd):
                     )
                 self.controller.tasks.remove_task(task['pid'])
 
-        self.prompt = '{0} tasks> '.format(len(self.controller.tasks))
+        self.prompt = '{}{} tasks>{} '.format(
+            Fore.YELLOW,
+            len(self.controller.tasks),
+            Style.RESET_ALL
+        )
         return super().postcmd(stop, line)
 
 
