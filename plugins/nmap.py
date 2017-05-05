@@ -1,8 +1,9 @@
 from libnmap.process import NmapProcess
 from libnmap.parser import NmapParser
-from database import Host, Service, NoResultFound
+from multiprocessing import Queue, Process
 
-from task import Task
+# from database import Host, Service, NoResultFound
+from task import AsyncTaskBack, AsyncTaskFront
 import plugins
 
 
@@ -21,10 +22,12 @@ class NmapPlugin(plugins.Plugin):
         host = args.split(' ')[0]
         args = ' '.join(args.split(' ')[1:])
 
-        nmap = NmapTask(self.controller.db)
-        nmap.scan(host, args)
+        inqueue, outqueue = Queue(), Queue()
+        nmap_front = NmapTask(inqueue, outqueue)
 
-        self.controller.tasks.append(nmap)
+        self.controller.tasks.append(nmap_front)
+        p = Process(target=NmapTaskBack, args=(host, args, inqueue, outqueue))
+        p.start()
 
     def do_nmap_import(self, args):
         nmap = NmapTask(self.controller.db)
@@ -34,56 +37,83 @@ class NmapPlugin(plugins.Plugin):
         return "NmapPlugin"
 
 
-plugins.plugins.register(NmapPlugin)
+class NmapTask(AsyncTaskFront):
+    pass
 
 
-class NmapTask(Task):
+class NmapTaskBack(AsyncTaskBack):
     nmap = None
 
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, host, args, inqueue, outqueue):
+        super().__init__(inqueue, outqueue)
+
+        self.nmap = NmapProcess(targets=host, options=args)
+        self.nmap.run()
+        if self.nmap.is_successful():
+            parsed = NmapParser.parse(self.nmap.stdout)
+            self.result = self.get_result(parsed)
+        self.thread.join()
 
     def parse_from_files(self, files):
         parsed = NmapParser.parse_fromfile(files)
         self.store(parsed)
 
-    def store(self, nmap_report):
-        for host in nmap_report.hosts:
-            tmp_host = ''
+    def get_result(self, report):
+        result = []
+        for host in report.hosts:
+            hostname = ''
             if len(host.hostnames):
-                tmp_host = host.hostnames.pop()
+                hostname = host.hostnames.pop()
 
             if host.status != 'up':
                 continue
 
-            try:
-                dbhost = self.db.get(Host, Host.ipv4 == host.address)
-            except NoResultFound:
-                dbhost = self.db.create(
-                    Host,
-                    ipv4=host.address,
-                    hostname=tmp_host
-                )
+            services = []
+            for service in host.services:
+                services.append({
+                    'port': service.port,
+                    'proto': service.protocol,
+                    'state': service.state,
+                    'version': service.banner,
+                    'service': service.service
+                })
 
-            # remove old services
-            # XXX should be create_or_update
-            for service in dbhost.services:
-                self.db.delete(Service, Service.id == service.id)
+            result.append({hostname: {'services': services}})
+        return result
 
-            for serv in host.services:
-                service = self.db.create(
-                    Service,
-                    port=serv.port,
-                    proto=serv.protocol,
-                    state=serv.state,
-                    service=serv.service,
-                    version=serv.banner,
-                    host=dbhost
-                )
+    # def store(self, nmap_report):
+    #     for host in nmap_report.hosts:
+    #         tmp_host = ''
+    #         if len(host.hostnames):
+    #             tmp_host = host.hostnames.pop()
 
-    def scan(self, host, args):
-        self.nmap = NmapProcess(targets=host, options=args)
-        self.nmap.run_background()
+    #         if host.status != 'up':
+    #             continue
+
+    #         try:
+    #             dbhost = self.db.get(Host, Host.ipv4 == host.address)
+    #         except NoResultFound:
+    #             dbhost = self.db.create(
+    #                 Host,
+    #                 ipv4=host.address,
+    #                 hostname=tmp_host
+    #             )
+
+    #         # remove old services
+    #         # XXX should be create_or_update
+    #         for service in dbhost.services:
+    #             self.db.delete(Service, Service.id == service.id)
+
+    #         for serv in host.services:
+    #             service = self.db.create(
+    #                 Service,
+    #                 port=serv.port,
+    #                 proto=serv.protocol,
+    #                 state=serv.state,
+    #                 service=serv.service,
+    #                 version=serv.banner,
+    #                 host=dbhost
+    #             )
 
     def is_running(self):
         if self.nmap:
@@ -93,9 +123,8 @@ class NmapTask(Task):
         return self.nmap.is_successful()
 
     def finish(self):
-        if self.nmap.is_successful():
-            parsed = NmapParser.parse(self.nmap.stdout)
-            self.store(parsed)
+        self._stop = True
+        return self.result
 
     def terminate(self):
         self.nmap.stop()
@@ -109,3 +138,6 @@ class NmapTask(Task):
             self.nmap.progress, self.nmap.command,
             'running' if self.nmap.is_running() else 'completed'
         )
+
+
+plugins.plugins.register(NmapPlugin)

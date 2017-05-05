@@ -24,3 +24,5 @@ plugins = PluginsLoadable()
 
 # uncomment to load plugin
 from . import nmap      # noqa
+from . import fork      # noqa
+from . import dummy     # noqa
