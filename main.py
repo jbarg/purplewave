@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import os
 import colorama
 import signal
@@ -18,7 +20,7 @@ class MainController(object):
 
     def __init__(self):
         signal.signal(signal.SIGINT, self.signal_handler)
-        self.prompt = MyPrompt(self)
+        self.prompt = CmdPrompt(self)
 
         for plugin in self.plugins:
             instance = plugin(self)
@@ -38,13 +40,13 @@ class MainController(object):
         pass
 
 
-class MyPrompt(Cmd):
+class CmdPrompt(Cmd):
     """Main command prompt class"""
     def __init__(self, controller):
         self.controller = controller
         colorama.init(autoreset=True)
-        self.doc_header = Fore.GREEN + "Documented commands (help <topic>):"
-        self.undoc_header = Fore.YELLOW + "Undocumented commands:"
+        self.doc_header = Fore.GREEN + self.doc_header
+        self.undoc_header = Fore.YELLOW + self.undoc_header
         super().__init__()
 
     def do_shell(self, args):
@@ -118,14 +120,14 @@ class MyPrompt(Cmd):
         # ilike filter in version banner
         if params.S:
             for search in params.S:
-                filters = or_(
+                filters = and_(filters, or_(
                     *[Service.version.ilike('%{}%'.format(search))
                       for search in params.S]
-                )
+                ))
 
         # filter open ports
         if params.u:
-            filters = and_(Service.state == 'open')
+            filters = and_(filters, Service.state == 'open')
 
         # filter specific
         if params.p:
@@ -207,7 +209,8 @@ class MyPrompt(Cmd):
                     print('{}@<{}> task {}completed'.format(
                         task['task'], task['pid'], Fore.GREEN)
                     )
-                    task['task'].finish()
+                    res = task['task'].finish()
+                    print(res)
                 else:
                     print('{}@<{}> task {}failed'.format(
                         task['task'], task['pid'], Fore.RED)
