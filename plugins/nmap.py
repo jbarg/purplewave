@@ -4,6 +4,8 @@ from multiprocessing import Queue, Process
 
 # from database import Host, Service, NoResultFound
 from task import AsyncTaskBack, AsyncTaskFront, Task
+from database import NoResultFound, Host, Service
+
 import plugins
 
 
@@ -26,7 +28,9 @@ class NmapPlugin(plugins.Plugin):
         nmap_front = NmapTask(inqueue, outqueue)
 
         self.controller.tasks.append(nmap_front)
-        p = Process(target=NmapTaskBack, args=(host, args, inqueue, outqueue))
+        db = self.controller.db
+        p = Process(target=NmapTaskBack,
+                    args=(host, db, args, inqueue, outqueue))
         p.start()
 
     def do_nmap_import(self, args):
@@ -41,17 +45,55 @@ class NmapTask(AsyncTaskFront):
     pass
 
 
-class NmapTaskBack(AsyncTaskBack):
+class NmapMixin(object):
+    def store(self, nmap_report):
+        for host in nmap_report.hosts:
+            tmp_host = ''
+            if len(host.hostnames):
+                tmp_host = host.hostnames.pop()
+
+            if host.status != 'up':
+                continue
+
+            try:
+                dbhost = self.db.get(Host, Host.ipv4 == host.address)
+            except NoResultFound:
+                dbhost = self.db.create(
+                    Host,
+                    ipv4=host.address,
+                    hostname=tmp_host
+                )
+
+            # remove old services
+            # XXX should be create_or_update
+            for service in dbhost.services:
+                self.db.delete(Service, Service.id == service.id)
+
+            for serv in host.services:
+                service = self.db.create(
+                    Service,
+                    port=serv.port,
+                    proto=serv.protocol,
+                    state=serv.state,
+                    service=serv.service,
+                    version=serv.banner,
+                    host=dbhost
+                )
+
+
+class NmapTaskBack(AsyncTaskBack, NmapMixin):
     nmap = None
 
-    def __init__(self, host, args, inqueue, outqueue):
+    def __init__(self, host, db, args, inqueue, outqueue):
         super().__init__(inqueue, outqueue)
 
         self.nmap = NmapProcess(targets=host, options=args)
         self.nmap.run()
+        self.db = db
         if self.nmap.is_successful():
             parsed = NmapParser.parse(self.nmap.stdout)
             self.result = self.get_result(parsed)
+            self.store(parsed)
         self.thread.join()
 
     def get_result(self, report):
@@ -102,14 +144,14 @@ class NmapTaskBack(AsyncTaskBack):
         )
 
 
-class NmapParserTask(Task):
+class NmapParserTask(Task, NmapMixin):
     def __init__(self, db):
         self.db = db
 
     def parse_from_files(self, files):
         parsed = NmapParser.parse_fromfile(files)
-        self.get_result(parsed)
+        self.store(parsed)
 
 
-NmapParserTask.get_result = NmapTaskBack.get_result
+# NmapParserTask.get_result = NmapTaskBack.get_result
 plugins.plugins.register(NmapPlugin)
