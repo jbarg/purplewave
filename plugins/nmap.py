@@ -3,7 +3,7 @@ from libnmap.parser import NmapParser
 from multiprocessing import Queue, Process
 
 # from database import Host, Service, NoResultFound
-from task import AsyncTaskBack, AsyncTaskFront
+from task import AsyncTaskBack, AsyncTaskFront, Task
 import plugins
 
 
@@ -30,7 +30,7 @@ class NmapPlugin(plugins.Plugin):
         p.start()
 
     def do_nmap_import(self, args):
-        nmap = NmapTask(self.controller.db)
+        nmap = NmapParserTask(self.controller.db)
         nmap.parse_from_files(args)
 
     def __str__(self):
@@ -54,10 +54,6 @@ class NmapTaskBack(AsyncTaskBack):
             self.result = self.get_result(parsed)
         self.thread.join()
 
-    def parse_from_files(self, files):
-        parsed = NmapParser.parse_fromfile(files)
-        self.store(parsed)
-
     def get_result(self, report):
         result = []
         for host in report.hosts:
@@ -80,40 +76,6 @@ class NmapTaskBack(AsyncTaskBack):
 
             result.append({hostname: {'services': services}})
         return result
-
-    # def store(self, nmap_report):
-    #     for host in nmap_report.hosts:
-    #         tmp_host = ''
-    #         if len(host.hostnames):
-    #             tmp_host = host.hostnames.pop()
-
-    #         if host.status != 'up':
-    #             continue
-
-    #         try:
-    #             dbhost = self.db.get(Host, Host.ipv4 == host.address)
-    #         except NoResultFound:
-    #             dbhost = self.db.create(
-    #                 Host,
-    #                 ipv4=host.address,
-    #                 hostname=tmp_host
-    #             )
-
-    #         # remove old services
-    #         # XXX should be create_or_update
-    #         for service in dbhost.services:
-    #             self.db.delete(Service, Service.id == service.id)
-
-    #         for serv in host.services:
-    #             service = self.db.create(
-    #                 Service,
-    #                 port=serv.port,
-    #                 proto=serv.protocol,
-    #                 state=serv.state,
-    #                 service=serv.service,
-    #                 version=serv.banner,
-    #                 host=dbhost
-    #             )
 
     def is_running(self):
         if self.nmap:
@@ -140,4 +102,14 @@ class NmapTaskBack(AsyncTaskBack):
         )
 
 
+class NmapParserTask(Task):
+    def __init__(self, db):
+        self.db = db
+
+    def parse_from_files(self, files):
+        parsed = NmapParser.parse_fromfile(files)
+        self.get_result(parsed)
+
+
+NmapParserTask.get_result = NmapTaskBack.get_result
 plugins.plugins.register(NmapPlugin)
