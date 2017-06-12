@@ -26,7 +26,7 @@ class MainController(object):
             instance = plugin(self)
             print('Loading plugin {}'.format(instance))
             for method_name, method in instance.get_do_methods():
-                setattr(self.prompt, method_name, method)
+                setattr(self.prompt.__class__, method_name, method)
 
         self.start_prompt()
 
